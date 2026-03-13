@@ -2,9 +2,43 @@ import { ILlmProvider } from "./ILlmProvider";
 import { ConversationMessage, LLMOptions, ProgressCb } from "./types";
 import { SYSTEM_ROLE_PROMPT, buildUserMessage } from "../../utils/prompts";
 import { getRequestTimeoutMs } from "./shared/llmutils";
+import OpenAICompatProvider from "./OpenAICompatProvider";
 
 export class OpenAIProvider implements ILlmProvider {
   readonly id = "openai";
+  private compatProvider = new OpenAICompatProvider();
+
+  private extractResponseText(data: any): string {
+    const directText =
+      data?.output_text || data?.choices?.[0]?.message?.content || "";
+    if (typeof directText === "string" && directText.trim()) {
+      return directText;
+    }
+
+    const outputItems = Array.isArray(data?.output) ? data.output : [];
+    const textParts = outputItems
+      .flatMap((item: any) => (Array.isArray(item?.content) ? item.content : []))
+      .map((content: any) => {
+        if (typeof content?.text === "string") return content.text;
+        if (typeof content?.output_text === "string") return content.output_text;
+        return "";
+      })
+      .filter((text: string) => text.trim().length > 0);
+
+    return textParts.join("\n").trim();
+  }
+
+  private getResponsesUrl(apiUrl: string): string {
+    return /\/v1\/.+$/i.test(apiUrl)
+      ? apiUrl.replace(/\/v1\/.+$/i, "/v1/responses")
+      : apiUrl.endsWith("/v1/responses")
+        ? apiUrl
+        : apiUrl.replace(/\/?$/, "/v1/responses");
+  }
+
+  private shouldUseCompatApi(apiUrl: string): boolean {
+    return /\/chat\/completions(?:[/?#]|$)/i.test(apiUrl.trim());
+  }
 
   async generateSummary(
     content: string,
@@ -17,18 +51,25 @@ export class OpenAIProvider implements ILlmProvider {
     const apiUrl = (options.apiUrl || "").trim();
     const model = (options.model || "gpt-3.5-turbo").trim();
     const temperature = options.temperature ?? 0.7;
+
     const streamEnabled = options.stream ?? true;
+
+    if (this.shouldUseCompatApi(apiUrl)) {
+      return this.compatProvider.generateSummary(
+        content,
+        isBase64,
+        prompt,
+        options,
+        onProgress,
+      );
+    }
 
     if (!apiUrl) throw new Error("API URL 未配置");
     if (!apiKey) throw new Error("API Key 未配置");
 
     // Base64 使用 Responses API
     if (isBase64) {
-      const responsesUrl = /\/v1\/.+$/i.test(apiUrl)
-        ? apiUrl.replace(/\/v1\/.+$/i, "/v1/responses")
-        : apiUrl.endsWith("/v1/responses")
-          ? apiUrl
-          : apiUrl.replace(/\/?$/, "/v1/responses");
+      const responsesUrl = this.getResponsesUrl(apiUrl);
 
       const input: any[] = [
         {
@@ -191,7 +232,7 @@ export class OpenAIProvider implements ILlmProvider {
           timeout: options.requestTimeoutMs ?? getRequestTimeoutMs(),
         });
         const data = res.response || res;
-        const text = (data?.output_text as string) || "";
+        const text = this.extractResponseText(data);
         if (onProgress && text) await onProgress(text);
         return text;
       } catch (e: any) {
@@ -216,9 +257,21 @@ export class OpenAIProvider implements ILlmProvider {
     }
 
     // 文本 Chat Completions
+    const responsesUrl = this.getResponsesUrl(apiUrl);
     const input: any[] = [
-      { role: "developer", content: SYSTEM_ROLE_PROMPT },
-      { role: "user", content: buildUserMessage(prompt || "", content) },
+      {
+        role: "developer",
+        content: [{ type: "input_text", text: SYSTEM_ROLE_PROMPT }],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: buildUserMessage(prompt || "", content),
+          },
+        ],
+      },
     ];
 
     const basePayload: any = {
@@ -235,12 +288,11 @@ export class OpenAIProvider implements ILlmProvider {
       let gotAnyDelta = false;
       let processedLength = 0;
       let partialLine = "";
-      let streamComplete = false;
       let abortedDueToError = false;
       let errorFromProgress: Error | null = null;
 
       try {
-        await Zotero.HTTP.request("POST", apiUrl, {
+        await Zotero.HTTP.request("POST", responsesUrl, {
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${apiKey}`,
@@ -288,16 +340,16 @@ export class OpenAIProvider implements ILlmProvider {
                   for (const raw of parts) {
                     if (raw.indexOf("data: ") !== 0) continue;
                     const jsonStr = raw.replace(/^data:\s*/, "").trim();
-                    if (jsonStr === "[DONE]") {
-                      streamComplete = true;
-                      return;
-                    }
                     try {
-                      const json = JSON.parse(jsonStr);
-                      const delta = json?.choices?.[0]?.delta?.content;
-                      if (typeof delta === "string" && delta.length > 0) {
+                      const evt = JSON.parse(jsonStr);
+                      const eventType = evt?.type as string;
+                      if (
+                        eventType === "response.output_text.delta" &&
+                        typeof evt.delta === "string" &&
+                        evt.delta.length > 0
+                      ) {
                         gotAnyDelta = true;
-                        chunks.push(delta.replace(/\n+/g, "\n"));
+                        chunks.push(evt.delta.replace(/\n+/g, "\n"));
                         const current = chunks.join("");
                         if (onProgress && current.length > delivered) {
                           const newChunk = current.slice(delivered);
@@ -343,7 +395,6 @@ export class OpenAIProvider implements ILlmProvider {
         });
       } catch (error: any) {
         if (abortedDueToError && errorFromProgress) throw errorFromProgress;
-        if (streamComplete && gotAnyDelta) return chunks.join("");
         if (gotAnyDelta && chunks.length > 0) return chunks.join("");
         let errorMessage = "未知错误";
         try {
@@ -370,17 +421,19 @@ export class OpenAIProvider implements ILlmProvider {
 
       // 回退非流式
       return await this.nonStreamCompletion(
-        apiUrl,
+        responsesUrl,
         apiKey,
         basePayload,
+        options,
         onProgress,
       );
     }
 
     return await this.nonStreamCompletion(
-      apiUrl,
+      responsesUrl,
       apiKey,
       basePayload,
+      options,
       onProgress,
     );
   }
@@ -396,6 +449,15 @@ export class OpenAIProvider implements ILlmProvider {
     const apiUrl = (options.apiUrl || "").trim();
     const model = (options.model || "gpt-3.5-turbo").trim();
     const temperature = options.temperature ?? 0.7;
+    if (this.shouldUseCompatApi(apiUrl)) {
+      return this.compatProvider.chat(
+        pdfContent,
+        isBase64,
+        conversation,
+        options,
+        onProgress,
+      );
+    }
 
     if (!apiUrl) throw new Error("API URL 未配置");
     if (!apiKey) throw new Error("API Key 未配置");
@@ -568,7 +630,13 @@ export class OpenAIProvider implements ILlmProvider {
     }
 
     // 文本模式
-    const input: any[] = [{ role: "developer", content: SYSTEM_ROLE_PROMPT }];
+    const responsesUrl = this.getResponsesUrl(apiUrl);
+    const input: any[] = [
+      {
+        role: "developer",
+        content: [{ type: "input_text", text: SYSTEM_ROLE_PROMPT }],
+      },
+    ];
     if (conversation && conversation.length > 0) {
       const firstUserMsg = conversation[0];
       if (isBase64) {
@@ -585,7 +653,12 @@ export class OpenAIProvider implements ILlmProvider {
       } else {
         input.push({
           role: "user",
-          content: buildUserMessage(firstUserMsg.content, pdfContent || ""),
+          content: [
+            {
+              type: "input_text",
+              text: buildUserMessage(firstUserMsg.content, pdfContent || ""),
+            },
+          ],
         });
       }
       if (conversation.length > 1) {
@@ -610,7 +683,7 @@ export class OpenAIProvider implements ILlmProvider {
     let gotAnyDelta = false;
 
     try {
-      await Zotero.HTTP.request("POST", apiUrl, {
+      await Zotero.HTTP.request("POST", responsesUrl, {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
@@ -664,14 +737,17 @@ export class OpenAIProvider implements ILlmProvider {
                 for (const raw of parts) {
                   if (raw.indexOf("data:") !== 0) continue;
                   const jsonStr = raw.replace(/^data:\s*/, "").trim();
-                  if (jsonStr === "[DONE]") continue;
                   if (!jsonStr) continue;
                   try {
-                    const json = JSON.parse(jsonStr);
-                    const delta = json?.choices?.[0]?.delta?.content;
-                    if (delta) {
+                    const evt = JSON.parse(jsonStr);
+                    const eventType = evt?.type as string;
+                    if (
+                      eventType === "response.output_text.delta" &&
+                      typeof evt.delta === "string" &&
+                      evt.delta.length > 0
+                    ) {
                       gotAnyDelta = true;
-                      chunks.push(delta.replace(/\n+/g, "\n"));
+                      chunks.push(evt.delta.replace(/\n+/g, "\n"));
                       const current = chunks.join("");
                       if (onProgress && current.length > delivered) {
                         const newChunk = current.slice(delivered);
@@ -742,6 +818,9 @@ export class OpenAIProvider implements ILlmProvider {
     const apiKey = (options.apiKey || "").trim();
     const apiUrl = (options.apiUrl || "").trim();
     const model = (options.model || "gpt-5").trim();
+    if (this.shouldUseCompatApi(apiUrl)) {
+      return this.compatProvider.testConnection(options);
+    }
     if (!apiUrl) throw new Error("API URL 未配置");
     if (!apiKey) throw new Error("API Key 未配置");
 
@@ -849,7 +928,7 @@ export class OpenAIProvider implements ILlmProvider {
     if (status === 200) {
       const json =
         typeof rawResponse === "string" ? JSON.parse(rawResponse) : rawResponse;
-      const content = json?.output_text || "";
+      const content = this.extractResponseText(json);
       return `✅ 连接成功!\n模型: ${model}\n响应: ${content}\n\n--- 原始响应 ---\n${typeof rawResponse === "string" ? rawResponse : JSON.stringify(rawResponse, null, 2)}`;
     }
 
@@ -882,6 +961,14 @@ export class OpenAIProvider implements ILlmProvider {
     const apiKey = (options.apiKey || "").trim();
     const apiUrl = (options.apiUrl || "").trim();
     const model = (options.model || "gpt-4o").trim();
+    if (this.shouldUseCompatApi(apiUrl)) {
+      return this.compatProvider.generateMultiFileSummary(
+        pdfFiles,
+        prompt,
+        options,
+        onProgress,
+      );
+    }
 
     if (!apiUrl) throw new Error("API URL 未配置");
     if (!apiKey) throw new Error("API Key 未配置");
@@ -1066,6 +1153,7 @@ export class OpenAIProvider implements ILlmProvider {
     apiUrl: string,
     apiKey: string,
     payload: any,
+    options: LLMOptions,
     onProgress?: ProgressCb,
   ): Promise<string> {
     const res = await Zotero.HTTP.request("POST", apiUrl, {
@@ -1075,9 +1163,10 @@ export class OpenAIProvider implements ILlmProvider {
       },
       body: JSON.stringify(payload),
       responseType: "json",
+      timeout: options.requestTimeoutMs ?? getRequestTimeoutMs(),
     });
     const data = res.response || res;
-    const text = data?.choices?.[0]?.message?.content || "";
+    const text = this.extractResponseText(data);
     const result = typeof text === "string" ? text : JSON.stringify(text);
     if (onProgress && result) await onProgress(result);
     return result;
