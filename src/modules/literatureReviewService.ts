@@ -20,7 +20,6 @@ import { PDFExtractor } from "./pdfExtractor";
 import { NoteGenerator } from "./noteGenerator";
 import LLMClient from "./llmClient";
 import { getPref } from "../utils/prefs";
-import { ProviderRegistry } from "./llmproviders/ProviderRegistry";
 import { PdfFileInfo } from "./llmproviders/ILlmProvider";
 import { marked } from "marked";
 import {
@@ -129,7 +128,7 @@ export class LiteratureReviewService {
       prompt ||
       (getPref("tableReviewPrompt" as any) as string) ||
       DEFAULT_TABLE_REVIEW_PROMPT;
-    const fullPrompt = `${reviewPrompt}\n\n以下是各文献的结构化信息表格：\n\n${aggregated}`;
+    const fullPrompt = `${reviewPrompt}\n\n以下提供的内容是各文献的结构化信息表格，请基于这些表格生成综述。`;
 
     let summaryContent = await LLMClient.generateSummaryWithRetry(
       aggregated,
@@ -268,7 +267,7 @@ export class LiteratureReviewService {
         ? `\n\n请仅使用以下表格条目回答问题：${selectedTableEntries.join("、")}。若条目证据不足，请明确说明。`
         : "";
 
-    const fullPrompt = `${questionPrompt}${selectedEntriesInstruction}\n\n以下是各文献的结构化信息表格：\n\n${aggregated}`;
+    const fullPrompt = `${questionPrompt}${selectedEntriesInstruction}\n\n以下提供的内容是各文献的结构化信息表格，请基于这些表格回答问题。`;
 
     progressCallback?.("正在回答问题...", 75);
     let answerContent = await LLMClient.generateSummaryWithRetry(
@@ -1159,82 +1158,59 @@ ${entryList}
     progressCallback?: (message: string, progress: number) => void,
   ): Promise<string> {
     if (pdfContents.length === 0) {
-      throw new Error("没有可用的 PDF 内容");
+      throw new Error("No PDF content available");
     }
 
-    // 检查当前使用的 API 提供商
-    const providerName = (getPref("provider") as string) || "google";
-    const provider = ProviderRegistry.get(providerName);
-
-    // 检查 provider 是否支持多文件处理
+    const provider = LLMClient.getCurrentProvider();
     const supportsMultiFile =
       provider && typeof provider.generateMultiFileSummary === "function";
 
-    // 判断是否是 Gemini 提供商（支持 google 和 gemini 两种名称）
-    const isGemini =
-      providerName === "google" ||
-      providerName.toLowerCase().includes("gemini");
-
-    if (supportsMultiFile && isGemini) {
-      // 使用 Gemini 多文件模式 (inline_data)
-      return await this.generateWithGeminiFileAPI(
-        pdfContents,
-        prompt,
-        progressCallback,
-      );
-    } else {
-      // 回退到合并文本模式
-      return await this.generateWithMergedText(
+    if (supportsMultiFile) {
+      return await this.generateWithCurrentProviderMultiFileAPI(
         pdfContents,
         prompt,
         progressCallback,
       );
     }
+
+    return await this.generateWithMergedText(
+      pdfContents,
+      prompt,
+      progressCallback,
+    );
   }
 
   /**
-   * 使用 Gemini File API 生成综述
+   * Reuse the current provider's multi-file API when available.
    */
-  private static async generateWithGeminiFileAPI(
+  private static async generateWithCurrentProviderMultiFileAPI(
     pdfContents: PdfFileData[],
     prompt: string,
     progressCallback?: (message: string, progress: number) => void,
   ): Promise<string> {
-    progressCallback?.("正在上传 PDF 文件到 Gemini...", 55);
+    progressCallback?.("Uploading PDF files...", 55);
 
-    // 获取 Gemini provider（支持 google 和 gemini 两种名称）
-    let provider = ProviderRegistry.get("google");
-    if (!provider) {
-      provider = ProviderRegistry.get("gemini");
-    }
+    const provider = LLMClient.getCurrentProvider();
     if (!provider || typeof provider.generateMultiFileSummary !== "function") {
-      throw new Error("Gemini provider 不支持多文件处理");
+      throw new Error("Current provider does not support multi-file processing");
     }
 
-    // 构建 PDF 文件信息列表
     const pdfFiles: PdfFileInfo[] = pdfContents.map((pdf, index) => ({
       filePath: pdf.filePath,
       displayName: `${index + 1}_${pdf.title.slice(0, 50)}`,
       base64Content: pdf.content,
     }));
 
-    // 获取 LLM 选项
+    // Reuse the active API configuration from Quick Settings.
     const options = LLMClient.getLLMOptions();
 
-    progressCallback?.("正在调用 AI 生成综述...", 65);
+    progressCallback?.("Generating review...", 65);
 
-    // 调用 Gemini 多文件处理
-    const result = await provider.generateMultiFileSummary(
-      pdfFiles,
-      prompt,
-      options,
-    );
-
-    return result;
+    return await provider.generateMultiFileSummary(pdfFiles, prompt, options);
   }
 
   /**
-   * 使用合并文本模式生成综述
+   * Fall back to merged-text review generation.
    */
   private static async generateWithMergedText(
     pdfContents: PdfFileData[],
@@ -1277,7 +1253,7 @@ ${entryList}
       throw new Error("当前 API 不支持多文件处理，且无法提取 PDF 文本内容");
     }
 
-    const fullPrompt = `${prompt}\n\n以下是需要综述的论文内容:\n${combinedContent}`;
+    const fullPrompt = `${prompt}\n\n以下提供的内容是多篇论文的合并文本，请基于这些内容生成综述。`;
 
     const result = await LLMClient.generateSummaryWithRetry(
       combinedContent,
