@@ -29,6 +29,14 @@ import {
   DEFAULT_TABLE_TEMPLATE,
 } from "../../utils/prompts";
 import { getPref, setPref } from "../../utils/prefs";
+import {
+  buildTableTemplateFromEntries,
+  isMarkdownSeparatorRow,
+  mergeUniqueEntries,
+  normalizeTableEntryName,
+  parseMarkdownTableCells,
+  parseTableTemplateEntries,
+} from "../literatureReview/tableUtils";
 
 /**
  * 提示词预设接口
@@ -904,61 +912,6 @@ export class LiteratureReviewView extends BaseView {
     nodeElement.appendChild(checkbox);
     nodeElement.appendChild(label);
 
-    // 状态标识
-    const tags: Array<{ tag: string }> = (node.item as any).getTags?.() || [];
-    const hasReviewed = tags.some((t) => t.tag === "AI-Reviewed");
-    const hasTable = tags.some((t) => t.tag === "AI-Table");
-
-    // 检查子笔记中是否有 AI-Table 标签
-    const noteIDs: number[] = (node.item as any).getNotes?.() || [];
-    const hasTableNote = hasTable;
-    if (!hasTableNote && noteIDs.length > 0) {
-      // 异步检查，但先标记可能有的
-      void (async () => {
-        for (const nid of noteIDs) {
-          try {
-            const n = await Zotero.Items.getAsync(nid);
-            if (!n) continue;
-            const noteTags: Array<{ tag: string }> =
-              (n as any).getTags?.() || [];
-            if (noteTags.some((t) => t.tag === "AI-Table")) {
-              // 动态添加标识
-              const tableBadge = this.createElement("span", {
-                className: "ai-pill ai-pill--success",
-                styles: {
-                  marginLeft: "6px",
-                  padding: "1px 6px",
-                  borderRadius: "3px",
-                  fontSize: "10px",
-                  flexShrink: "0",
-                },
-                textContent: "📊 已填表",
-              });
-              nodeElement.insertBefore(tableBadge, label.nextSibling);
-              break;
-            }
-          } catch {
-            // skip
-          }
-        }
-      })();
-    }
-
-    if (hasReviewed) {
-      const reviewedBadge = this.createElement("span", {
-        className: "ai-pill ai-pill--info",
-        styles: {
-          marginLeft: "6px",
-          padding: "1px 6px",
-          borderRadius: "3px",
-          fontSize: "10px",
-          flexShrink: "0",
-        },
-        textContent: "✅ 已综述",
-      });
-      nodeElement.appendChild(reviewedBadge);
-    }
-
     // 悬停效果
     nodeElement.addEventListener("mouseenter", () => {
       nodeElement.style.background = "var(--ai-review-node-hover)";
@@ -1198,76 +1151,6 @@ export class LiteratureReviewView extends BaseView {
     return attachments;
   }
 
-  private normalizeTableEntryName(entry: string): string {
-    return entry.trim().replace(/\s+/g, " ").toLowerCase();
-  }
-
-  private parseMarkdownTableCells(line: string): string[] {
-    const content = line.trim().replace(/^\|/, "").replace(/\|$/, "");
-    return content.split("|").map((cell) => cell.trim());
-  }
-
-  private isMarkdownSeparatorRow(cells: string[]): boolean {
-    return (
-      cells.length > 0 &&
-      cells.every((cell) => /^:?-{3,}:?$/.test(cell.replace(/\s+/g, "")))
-    );
-  }
-
-  private parseTableTemplateEntries(template: string): string[] {
-    const entries: string[] = [];
-    const seen = new Set<string>();
-
-    for (const line of template.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith("|")) continue;
-
-      const cells = this.parseMarkdownTableCells(trimmed);
-      if (cells.length < 2 || this.isMarkdownSeparatorRow(cells)) continue;
-
-      const first = cells[0].trim();
-      const normalizedFirst = this.normalizeTableEntryName(first);
-      if (!normalizedFirst) continue;
-      if (
-        normalizedFirst === "维度" ||
-        normalizedFirst === "dimension" ||
-        normalizedFirst === "field"
-      ) {
-        continue;
-      }
-
-      if (seen.has(normalizedFirst)) continue;
-      seen.add(normalizedFirst);
-      entries.push(first);
-    }
-
-    return entries;
-  }
-
-  private buildTableTemplateFromEntries(entries: string[]): string {
-    if (entries.length === 0) {
-      return DEFAULT_TABLE_TEMPLATE;
-    }
-    const rows = entries.map((entry) => `| ${entry} | |`);
-    return ["| 维度 | 内容 |", "|------|------|", ...rows].join("\n");
-  }
-
-  private mergeUniqueEntries(groups: string[][]): string[] {
-    const merged: string[] = [];
-    const seen = new Set<string>();
-    for (const group of groups) {
-      for (const entry of group) {
-        const value = entry.trim();
-        if (!value) continue;
-        const normalized = this.normalizeTableEntryName(value);
-        if (!normalized || seen.has(normalized)) continue;
-        seen.add(normalized);
-        merged.push(value);
-      }
-    }
-    return merged;
-  }
-
   private async loadFirstCollectionTableEntries(): Promise<void> {
     this.firstCollectionTableEntries = [];
     for (const node of this.treeNodes) {
@@ -1276,7 +1159,7 @@ export class LiteratureReviewView extends BaseView {
           node.item,
         );
         if (!tableContent) continue;
-        const entries = this.parseTableTemplateEntries(tableContent);
+        const entries = parseTableTemplateEntries(tableContent);
         if (entries.length > 0) {
           this.firstCollectionTableEntries = entries;
           return;
@@ -1300,7 +1183,7 @@ export class LiteratureReviewView extends BaseView {
       if (!Array.isArray(parsed) || parsed.length === 0) return null;
       const normalized = parsed
         .filter((item) => typeof item === "string")
-        .map((item) => this.normalizeTableEntryName(item))
+        .map((item) => normalizeTableEntryName(item))
         .filter(Boolean);
       return normalized.length > 0 ? new Set(normalized) : null;
     } catch {
@@ -1315,7 +1198,7 @@ export class LiteratureReviewView extends BaseView {
       this.tablePromptTextarea?.value.trim() ||
       this.getCurrentTablePreset().prompt ||
       DEFAULT_TABLE_TEMPLATE;
-    const templateEntries = this.parseTableTemplateEntries(template);
+    const templateEntries = parseTableTemplateEntries(template);
     const baseEntries =
       this.firstCollectionTableEntries.length > 0
         ? this.firstCollectionTableEntries
@@ -1326,7 +1209,7 @@ export class LiteratureReviewView extends BaseView {
           this.targetedNewEntriesTextarea?.value || "",
         )
       : [];
-    const entries = this.mergeUniqueEntries([
+    const entries = mergeUniqueEntries([
       baseEntries,
       currentAppendingEntries,
     ]);
@@ -1385,7 +1268,7 @@ export class LiteratureReviewView extends BaseView {
         checkbox.checked = isCheckedFromPrev;
       } else if (savedSelected) {
         checkbox.checked = savedSelected.has(
-          this.normalizeTableEntryName(entry),
+          normalizeTableEntryName(entry),
         );
       } else {
         checkbox.checked = true;
@@ -1438,7 +1321,7 @@ export class LiteratureReviewView extends BaseView {
     for (const part of raw.split(/[\n,，;；]+/)) {
       const value = part.trim();
       if (!value) continue;
-      const normalized = this.normalizeTableEntryName(value);
+      const normalized = normalizeTableEntryName(value);
       if (!normalized || seen.has(normalized)) continue;
       seen.add(normalized);
       result.push(value);
@@ -1454,12 +1337,12 @@ export class LiteratureReviewView extends BaseView {
     if (extraEntries.length === 0) return template;
 
     const existingEntries = new Set(
-      this.parseTableTemplateEntries(template).map((entry) =>
-        this.normalizeTableEntryName(entry),
+      parseTableTemplateEntries(template).map((entry) =>
+        normalizeTableEntryName(entry),
       ),
     );
     const toAppend = extraEntries.filter(
-      (entry) => !existingEntries.has(this.normalizeTableEntryName(entry)),
+      (entry) => !existingEntries.has(normalizeTableEntryName(entry)),
     );
     if (toAppend.length === 0) return template;
 
@@ -1476,8 +1359,8 @@ export class LiteratureReviewView extends BaseView {
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed.startsWith("|")) continue;
-      const cells = this.parseMarkdownTableCells(trimmed);
-      if (cells.length >= 2 && !this.isMarkdownSeparatorRow(cells)) {
+      const cells = parseMarkdownTableCells(trimmed);
+      if (cells.length >= 2 && !isMarkdownSeparatorRow(cells)) {
         columnCount = Math.max(2, cells.length);
         break;
       }
@@ -1609,14 +1492,14 @@ export class LiteratureReviewView extends BaseView {
       (getPref("tableTemplate" as any) as string) ||
       DEFAULT_TABLE_TEMPLATE;
     const configuredTemplateEntries =
-      this.parseTableTemplateEntries(tableTemplate);
+      parseTableTemplateEntries(tableTemplate);
     const baseEntriesForAsk =
       this.firstCollectionTableEntries.length > 0
         ? this.firstCollectionTableEntries
         : configuredTemplateEntries;
     const baseTemplateForAsk =
       this.firstCollectionTableEntries.length > 0
-        ? this.buildTableTemplateFromEntries(baseEntriesForAsk)
+        ? buildTableTemplateFromEntries(baseEntriesForAsk)
         : tableTemplate;
     const selectedTableEntries = this.collectSelectedTargetedTableEntries();
     if (selectedTableEntries.length === 0) {

@@ -1166,61 +1166,9 @@ export class OpenAIProvider implements ILlmProvider {
       timeout: options.requestTimeoutMs ?? getRequestTimeoutMs(),
     });
     const data = res.response || res;
-<<<<<<< HEAD
     const result = this.extractResponseText(data);
-=======
-    const text = this.extractResponseText(data);
-    const result = typeof text === "string" ? text : JSON.stringify(text);
->>>>>>> e4a45ceaa0836fdd1da789438028a84e21c0fd99
     if (onProgress && result) await onProgress(result);
     return result;
-  }
-
-  private extractResponseText(data: any): string {
-    if (!data) return "";
-
-    if (typeof data?.output_text === "string" && data.output_text.trim()) {
-      return data.output_text;
-    }
-
-    const outputBlocks = Array.isArray(data?.output) ? data.output : [];
-    const responseTexts: string[] = [];
-    for (const block of outputBlocks) {
-      const contents = Array.isArray(block?.content) ? block.content : [];
-      for (const part of contents) {
-        if (typeof part?.text === "string" && part.text.trim()) {
-          responseTexts.push(part.text);
-        } else if (
-          typeof part?.content === "string" &&
-          part.content.trim()
-        ) {
-          responseTexts.push(part.content);
-        }
-      }
-    }
-    if (responseTexts.length) {
-      return responseTexts.join("\n");
-    }
-
-    const chatContent = data?.choices?.[0]?.message?.content;
-    if (typeof chatContent === "string") {
-      return chatContent;
-    }
-    if (Array.isArray(chatContent)) {
-      const joined = chatContent
-        .map((part: any) =>
-          typeof part?.text === "string"
-            ? part.text
-            : typeof part?.content === "string"
-              ? part.content
-              : "",
-        )
-        .filter(Boolean)
-        .join("\n");
-      if (joined) return joined;
-    }
-
-    return "";
   }
 }
 

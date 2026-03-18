@@ -901,44 +901,6 @@ function renderTableSection(
   `;
   tableTitle.innerHTML = `📊 <span>表格归纳</span>`;
 
-  // 异步加载综述状态徽章
-  void (async () => {
-    const itemTags: Array<{ tag: string }> = (item as any).getTags?.() || [];
-    const isReviewed = itemTags.some(
-      (t: { tag: string }) => t.tag === "AI-Reviewed",
-    );
-
-    let hasTable = false;
-    const subNoteIDs: number[] = (item as any).getNotes?.() || [];
-    for (const nid of subNoteIDs) {
-      try {
-        const n = await Zotero.Items.getAsync(nid);
-        if (!n) continue;
-        const nTags: Array<{ tag: string }> = (n as any).getTags?.() || [];
-        if (nTags.some((t: { tag: string }) => t.tag === "AI-Table")) {
-          hasTable = true;
-          break;
-        }
-      } catch {
-        // skip
-      }
-    }
-
-    let badges = "";
-    if (hasTable) {
-      badges += `<span style="margin-left:6px;padding:1px 5px;border-radius:3px;font-size:9px;background:rgba(76,175,80,0.15);color:#4caf50;">📊 已填表</span>`;
-    }
-    if (isReviewed) {
-      badges += `<span style="margin-left:4px;padding:1px 5px;border-radius:3px;font-size:9px;background:rgba(99,102,241,0.15);color:#6366f1;">✅ 已综述</span>`;
-    }
-    if (badges) {
-      const titleSpan = tableTitle.querySelector("span");
-      if (titleSpan) {
-        titleSpan.innerHTML = `表格归纳${badges}`;
-      }
-    }
-  })();
-
   // 操作按钮容器
   const tableBtnContainer = doc.createElement("div");
   tableBtnContainer.style.cssText = `

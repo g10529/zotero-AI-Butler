@@ -750,7 +750,6 @@ export class TaskQueueManager {
 
     ztoolkit.log(`添加综述任务: ${task.title} (${taskId})`);
 
-    // 立即执行
     this.executeReviewTask(taskId, prompt).catch((e) => {
       ztoolkit.log(`综述任务执行失败: ${e}`);
     });
@@ -765,83 +764,26 @@ export class TaskQueueManager {
     taskId: string,
     prompt?: string,
   ): Promise<void> {
-    const task = this.tasks.get(taskId);
-    if (!task || task.taskType !== "review") return;
+    await this.executeReviewFamilyTask(
+      taskId,
+      "review",
+      "综述任务参数不完整",
+      async (task, collection, pdfAttachments, onProgress) => {
+        const { LiteratureReviewService } =
+          await import("./literatureReviewService");
+        const reviewName =
+          task.reviewName || `综述 ${new Date().toISOString().slice(2, 10)}`;
 
-    if (
-      task.status === TaskStatus.PROCESSING ||
-      task.status === TaskStatus.COMPLETED
-    )
-      return;
-
-    task.status = TaskStatus.PROCESSING;
-    task.startedAt = new Date();
-    task.progress = 0;
-    task.workflowStage = "正在初始化";
-    this.processingTasks.add(taskId);
-    await this.saveToStorage();
-
-    try {
-      if (!task.collectionId || !task.pdfAttachmentIds?.length) {
-        throw new Error("综述任务参数不完整");
-      }
-
-      const collection = Zotero.Collections.get(
-        task.collectionId,
-      ) as Zotero.Collection;
-      if (!collection) throw new Error("分类不存在");
-
-      // 加载 PDF 附件
-      const pdfAttachments: Zotero.Item[] = [];
-      for (const attId of task.pdfAttachmentIds) {
-        const att = await Zotero.Items.getAsync(attId);
-        if (att) pdfAttachments.push(att);
-      }
-
-      if (pdfAttachments.length === 0) throw new Error("没有可用的 PDF 附件");
-
-      const { LiteratureReviewService } =
-        await import("./literatureReviewService");
-
-      const reviewName =
-        task.reviewName || `综述 ${new Date().toISOString().slice(2, 10)}`;
-
-      await LiteratureReviewService.generateReview(
-        collection,
-        pdfAttachments,
-        reviewName,
-        prompt || "",
-        task.tableTemplate || "",
-        (message: string, progress: number) => {
-          task.progress = progress;
-          task.workflowStage = message;
-          this.notifyProgress(taskId, progress, message);
-          if (progress % 20 === 0 || progress === 100) {
-            this.saveToStorage().catch(() => {});
-          }
-        },
-      );
-
-      task.status = TaskStatus.COMPLETED;
-      task.progress = 100;
-      task.workflowStage = "完成";
-      task.completedAt = new Date();
-      task.duration = Math.floor(
-        (task.completedAt.getTime() - task.startedAt!.getTime()) / 1000,
-      );
-
-      ztoolkit.log(`综述任务完成: ${task.title} (耗时${task.duration}秒)`);
-      this.notifyComplete(taskId, true);
-    } catch (error: any) {
-      task.error = error?.message || "未知错误";
-      task.workflowStage = "失败";
-      task.status = TaskStatus.FAILED;
-      task.completedAt = new Date();
-      this.notifyComplete(taskId, false, task.error);
-    } finally {
-      this.processingTasks.delete(taskId);
-      await this.saveToStorage();
-    }
+        await LiteratureReviewService.generateReview(
+          collection,
+          pdfAttachments,
+          reviewName,
+          prompt || "",
+          task.tableTemplate || "",
+          onProgress,
+        );
+      },
+    );
   }
 
   /**
@@ -901,7 +843,6 @@ export class TaskQueueManager {
 
     ztoolkit.log(`添加针对性提问任务: ${task.title} (${taskId})`);
 
-    // 立即执行
     this.executeTargetedQuestionTask(taskId).catch((e) => {
       ztoolkit.log(`针对性提问任务执行失败: ${e}`);
     });
@@ -913,14 +854,63 @@ export class TaskQueueManager {
    * 执行针对性提问任务
    */
   private async executeTargetedQuestionTask(taskId: string): Promise<void> {
-    const task = this.tasks.get(taskId);
-    if (!task || task.taskType !== "targetedQuestion") return;
+    await this.executeReviewFamilyTask(
+      taskId,
+      "targetedQuestion",
+      "针对性提问任务参数不完整",
+      async (task, collection, pdfAttachments, onProgress) => {
+        if (!task.targetedPrompt) {
+          throw new Error("针对性提问任务参数不完整");
+        }
 
+        const { LiteratureReviewService } =
+          await import("./literatureReviewService");
+        const noteTitle =
+          task.targetedNoteTitle ||
+          `针对性提问 ${new Date().toISOString().slice(2, 10)}`;
+
+        await LiteratureReviewService.generateTargetedAnswer(
+          collection,
+          pdfAttachments,
+          noteTitle,
+          task.targetedPrompt,
+          task.tableTemplate || "",
+          {
+            selectedTableEntries: task.targetedSelectedTableEntries || [],
+            appendedTableEntries: task.targetedAppendedTableEntries || [],
+          },
+          onProgress,
+        );
+      },
+    );
+  }
+
+  /**
+   * 获取针对性提问任务
+   */
+  public getTargetedQuestionTasks(): TaskItem[] {
+    return this.getAllTasks().filter((t) => t.taskType === "targetedQuestion");
+  }
+
+  private async executeReviewFamilyTask(
+    taskId: string,
+    expectedType: "review" | "targetedQuestion",
+    missingParamsMessage: string,
+    executor: (
+      task: TaskItem,
+      collection: Zotero.Collection,
+      pdfAttachments: Zotero.Item[],
+      onProgress: (message: string, progress: number) => void,
+    ) => Promise<void>,
+  ): Promise<void> {
+    const task = this.tasks.get(taskId);
+    if (!task || task.taskType !== expectedType) return;
     if (
       task.status === TaskStatus.PROCESSING ||
       task.status === TaskStatus.COMPLETED
-    )
+    ) {
       return;
+    }
 
     task.status = TaskStatus.PROCESSING;
     task.startedAt = new Date();
@@ -930,51 +920,19 @@ export class TaskQueueManager {
     await this.saveToStorage();
 
     try {
-      if (
-        !task.collectionId ||
-        !task.pdfAttachmentIds?.length ||
-        !task.targetedPrompt
-      ) {
-        throw new Error("针对性提问任务参数不完整");
-      }
-
-      const collection = Zotero.Collections.get(
-        task.collectionId,
-      ) as Zotero.Collection;
-      if (!collection) throw new Error("分类不存在");
-
-      const pdfAttachments: Zotero.Item[] = [];
-      for (const attId of task.pdfAttachmentIds) {
-        const att = await Zotero.Items.getAsync(attId);
-        if (att) pdfAttachments.push(att);
-      }
-      if (pdfAttachments.length === 0) throw new Error("没有可用的 PDF 附件");
-
-      const { LiteratureReviewService } =
-        await import("./literatureReviewService");
-      const noteTitle =
-        task.targetedNoteTitle ||
-        `针对性提问 ${new Date().toISOString().slice(2, 10)}`;
-
-      await LiteratureReviewService.generateTargetedAnswer(
-        collection,
-        pdfAttachments,
-        noteTitle,
-        task.targetedPrompt,
-        task.tableTemplate || "",
-        {
-          selectedTableEntries: task.targetedSelectedTableEntries || [],
-          appendedTableEntries: task.targetedAppendedTableEntries || [],
-        },
-        (message: string, progress: number) => {
-          task.progress = progress;
-          task.workflowStage = message;
-          this.notifyProgress(taskId, progress, message);
-          if (progress % 20 === 0 || progress === 100) {
-            this.saveToStorage().catch(() => {});
-          }
-        },
+      const { collection, pdfAttachments } = await this.loadReviewFamilyContext(
+        task,
+        missingParamsMessage,
       );
+
+      await executor(task, collection, pdfAttachments, (message, progress) => {
+        task.progress = progress;
+        task.workflowStage = message;
+        this.notifyProgress(taskId, progress, message);
+        if (progress % 20 === 0 || progress === 100) {
+          this.saveToStorage().catch(() => {});
+        }
+      });
 
       task.status = TaskStatus.COMPLETED;
       task.progress = 100;
@@ -983,10 +941,7 @@ export class TaskQueueManager {
       task.duration = Math.floor(
         (task.completedAt.getTime() - task.startedAt!.getTime()) / 1000,
       );
-
-      ztoolkit.log(
-        `针对性提问任务完成: ${task.title} (耗时${task.duration}秒)`,
-      );
+      ztoolkit.log(`${task.title} 完成 (耗时${task.duration}秒)`);
       this.notifyComplete(taskId, true);
     } catch (error: any) {
       task.error = error?.message || "未知错误";
@@ -1000,11 +955,36 @@ export class TaskQueueManager {
     }
   }
 
-  /**
-   * 获取针对性提问任务
-   */
-  public getTargetedQuestionTasks(): TaskItem[] {
-    return this.getAllTasks().filter((t) => t.taskType === "targetedQuestion");
+  private async loadReviewFamilyContext(
+    task: TaskItem,
+    missingParamsMessage: string,
+  ): Promise<{
+    collection: Zotero.Collection;
+    pdfAttachments: Zotero.Item[];
+  }> {
+    if (!task.collectionId || !task.pdfAttachmentIds?.length) {
+      throw new Error(missingParamsMessage);
+    }
+
+    const collection = Zotero.Collections.get(task.collectionId) as
+      | Zotero.Collection
+      | undefined;
+    if (!collection) {
+      throw new Error("分类不存在");
+    }
+
+    const pdfAttachments: Zotero.Item[] = [];
+    for (const attId of task.pdfAttachmentIds) {
+      const att = await Zotero.Items.getAsync(attId);
+      if (att) {
+        pdfAttachments.push(att);
+      }
+    }
+    if (pdfAttachments.length === 0) {
+      throw new Error("没有可用的 PDF 附件");
+    }
+
+    return { collection, pdfAttachments };
   }
 
   /**
