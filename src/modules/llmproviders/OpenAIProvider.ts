@@ -191,7 +191,7 @@ export class OpenAIProvider implements ILlmProvider {
           timeout: options.requestTimeoutMs ?? getRequestTimeoutMs(),
         });
         const data = res.response || res;
-        const text = (data?.output_text as string) || "";
+        const text = this.extractResponseText(data);
         if (onProgress && text) await onProgress(text);
         return text;
       } catch (e: any) {
@@ -849,7 +849,7 @@ export class OpenAIProvider implements ILlmProvider {
     if (status === 200) {
       const json =
         typeof rawResponse === "string" ? JSON.parse(rawResponse) : rawResponse;
-      const content = json?.output_text || "";
+      const content = this.extractResponseText(json);
       return `✅ 连接成功!\n模型: ${model}\n响应: ${content}\n\n--- 原始响应 ---\n${typeof rawResponse === "string" ? rawResponse : JSON.stringify(rawResponse, null, 2)}`;
     }
 
@@ -1077,10 +1077,56 @@ export class OpenAIProvider implements ILlmProvider {
       responseType: "json",
     });
     const data = res.response || res;
-    const text = data?.choices?.[0]?.message?.content || "";
-    const result = typeof text === "string" ? text : JSON.stringify(text);
+    const result = this.extractResponseText(data);
     if (onProgress && result) await onProgress(result);
     return result;
+  }
+
+  private extractResponseText(data: any): string {
+    if (!data) return "";
+
+    if (typeof data?.output_text === "string" && data.output_text.trim()) {
+      return data.output_text;
+    }
+
+    const outputBlocks = Array.isArray(data?.output) ? data.output : [];
+    const responseTexts: string[] = [];
+    for (const block of outputBlocks) {
+      const contents = Array.isArray(block?.content) ? block.content : [];
+      for (const part of contents) {
+        if (typeof part?.text === "string" && part.text.trim()) {
+          responseTexts.push(part.text);
+        } else if (
+          typeof part?.content === "string" &&
+          part.content.trim()
+        ) {
+          responseTexts.push(part.content);
+        }
+      }
+    }
+    if (responseTexts.length) {
+      return responseTexts.join("\n");
+    }
+
+    const chatContent = data?.choices?.[0]?.message?.content;
+    if (typeof chatContent === "string") {
+      return chatContent;
+    }
+    if (Array.isArray(chatContent)) {
+      const joined = chatContent
+        .map((part: any) =>
+          typeof part?.text === "string"
+            ? part.text
+            : typeof part?.content === "string"
+              ? part.content
+              : "",
+        )
+        .filter(Boolean)
+        .join("\n");
+      if (joined) return joined;
+    }
+
+    return "";
   }
 }
 

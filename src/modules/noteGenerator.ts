@@ -30,6 +30,7 @@ import { LLMClient } from "./llmClient";
 import { SummaryView } from "./views/SummaryView";
 import { getPref } from "../utils/prefs";
 import { MainWindow } from "./views/MainWindow";
+import { AutoTagService } from "./autoTagService";
 import { marked } from "marked";
 import {
   parseMultiRoundPrompts,
@@ -96,6 +97,7 @@ export class NoteGenerator {
       // 如果不是强制覆盖，且已存在笔记，则检查策略
       if (existing && !options?.forceOverwrite) {
         if (policy === "skip") {
+          await this.tryAutoTagItem(item, progressCallback);
           progressCallback?.("已存在AI笔记，跳过", 100);
           return {
             note: existing as Zotero.Item,
@@ -321,6 +323,8 @@ export class NoteGenerator {
         outputWindow.finishItem();
       }
 
+      await this.tryAutoTagItem(item, progressCallback);
+
       // 通知进度回调完成 (100%)
       progressCallback?.("完成！", 100);
 
@@ -388,6 +392,32 @@ export class NoteGenerator {
       // 不创建包含错误信息的笔记,直接抛出异常由上层处理
       throw error;
     }
+  }
+
+  private static async tryAutoTagItem(
+    item: Zotero.Item,
+    progressCallback?: (message: string, progress: number) => void,
+  ): Promise<void> {
+    if (!AutoTagService.isEnabled()) return;
+
+    progressCallback?.("正在自动添加标签...", 90);
+    const result = await AutoTagService.generateAndApplyTags(item);
+
+    if (result.reason === "empty-response") {
+      throw new Error("自动标签返回为空");
+    }
+
+    if (result.skipped) {
+      progressCallback?.("自动标签未命中有效标签", 95);
+      return;
+    }
+
+    progressCallback?.(
+      result.addedTags.length
+        ? `自动标签完成，新增 ${result.addedTags.length} 个标签`
+        : "自动标签完成，未新增标签",
+      95,
+    );
   }
 
   /** 查找已有的 AI 笔记(通过标签或标题标识) */

@@ -35,6 +35,7 @@ import {
   PROMPT_VERSION,
   shouldUpdatePrompt,
 } from "./utils/prompts";
+import { getDefaultAutoTagList } from "./utils/autoTags";
 
 /**
  * 插件启动钩子函数
@@ -223,6 +224,8 @@ function initializeDefaultPrefsOnStartup() {
     temperature: "0.7", // 默认温度参数,平衡创造性和准确性
     stream: true, // 默认启用流式输出,提供更好的用户体验
     summaryPrompt: getDefaultSummaryPrompt(), // 加载默认提示词模板
+    autoTagEnabled: false,
+    autoTagList: getDefaultAutoTagList(),
     promptVersion: PROMPT_VERSION, // 当前提示词版本号
   };
 

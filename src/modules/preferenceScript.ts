@@ -7,6 +7,7 @@ import {
   PROMPT_VERSION,
   shouldUpdatePrompt,
 } from "../utils/prompts";
+import { getDefaultAutoTagList } from "../utils/autoTags";
 import { MainWindow } from "./views/MainWindow";
 import { config } from "../../package.json";
 
@@ -218,6 +219,8 @@ function initializeDefaultPrefs() {
     temperature: "0.7",
     stream: true,
     summaryPrompt: getDefaultSummaryPrompt(),
+    autoTagEnabled: false,
+    autoTagList: getDefaultAutoTagList(),
     promptVersion: PROMPT_VERSION,
     // 文献综述表格填写相关
     tableTemplate: getDefaultTableTemplate(),

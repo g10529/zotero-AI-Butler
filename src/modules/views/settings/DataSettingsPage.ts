@@ -11,6 +11,7 @@ import {
 } from "../ui/components";
 import { TaskQueueManager } from "../../taskQueue";
 import { getDefaultSummaryPrompt } from "../../../utils/prompts";
+import { getDefaultAutoTagList } from "../../../utils/autoTags";
 
 export class DataSettingsPage {
   private container: HTMLElement;
@@ -162,6 +163,8 @@ export class DataSettingsPage {
       "enableTopP",
       "stream",
       "summaryPrompt",
+      "autoTagEnabled",
+      "autoTagList",
       "customPrompts",
       "maxRetries",
       "batchSize",
@@ -268,6 +271,8 @@ export class DataSettingsPage {
 
     // 恢复常用项
     setPref("summaryPrompt", getDefaultSummaryPrompt());
+    setPref("autoTagEnabled" as any, false);
+    setPref("autoTagList" as any, getDefaultAutoTagList());
     setPref("provider", "openai");
     setPref("openaiApiUrl", "https://api.openai.com/v1/responses");
     setPref("openaiApiKey", "");

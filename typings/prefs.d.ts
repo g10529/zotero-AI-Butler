@@ -36,6 +36,8 @@ declare namespace _ZoteroTypes {
       "requestTimeout": string;
       "mineruApiKey": string;
       "summaryPrompt": string;
+      "autoTagEnabled": boolean;
+      "autoTagList": string;
       "customPrompts": string;
       "summaryMode": string;
       "multiRoundPrompts": string;
