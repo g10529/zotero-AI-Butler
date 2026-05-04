@@ -37,6 +37,7 @@ declare namespace _ZoteroTypes {
       "mineruApiKey": string;
       "mineruModelVersion": string;
       "summaryPrompt": string;
+      "autoTagList": string;
       "customPrompts": string;
       "summaryMode": string;
       "multiRoundPrompts": string;

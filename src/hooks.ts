@@ -45,6 +45,7 @@ import {
   PROMPT_VERSION,
   shouldUpdatePrompt,
 } from "./utils/prompts";
+import { getDefaultAutoTagList } from "./utils/autoTags";
 
 /**
  * 插件启动钩子函数
@@ -234,6 +235,7 @@ function initializeDefaultPrefsOnStartup() {
     temperature: "0.7", // 默认温度参数,平衡创造性和准确性
     stream: true, // 默认启用流式输出,提供更好的用户体验
     summaryPrompt: getDefaultSummaryPrompt(), // 加载默认提示词模板
+    autoTagList: getDefaultAutoTagList(),
     promptVersion: PROMPT_VERSION, // 当前提示词版本号
     contextMenuItemVisibility: DEFAULT_CONTEXT_MENU_ITEM_VISIBILITY_PREF,
     contextMenuItemOrder: DEFAULT_CONTEXT_MENU_ITEM_ORDER_PREF,
@@ -309,6 +311,7 @@ const CONTEXT_MENU_DOM_IDS: Record<ContextMenuItemId, string> = {
   imageSummary: "zotero-itemmenu-ai-butler-image-summary",
   mindmap: "zotero-itemmenu-ai-butler-mindmap",
   fillTable: "zotero-itemmenu-ai-butler-fill-table",
+  autoTag: "zotero-itemmenu-ai-butler-auto-tag",
   literatureReview: "zotero-collectionmenu-ai-butler-literature-review",
 };
 
@@ -490,6 +493,20 @@ function registerContextMenuItem() {
         },
         getVisibility: () =>
           isContextMenuItemEnabled("fillTable") && isRegularItemSelection(),
+      },
+    },
+    autoTag: {
+      scope: "item",
+      options: {
+        tag: "menuitem",
+        id: CONTEXT_MENU_DOM_IDS.autoTag,
+        label: "AI 管家自动标签",
+        icon: menuIcon,
+        commandListener: async () => {
+          await handleAutoTag();
+        },
+        getVisibility: () =>
+          isContextMenuItemEnabled("autoTag") && isRegularItemSelection(),
       },
     },
     literatureReview: {
@@ -1382,6 +1399,63 @@ async function handleFillTable() {
     })
       .createLine({
         text: `❌ 填表失败: ${error.message || error}`,
+        type: "error",
+      })
+      .show();
+  }
+}
+
+/**
+ * 处理文献右键自动标签。
+ */
+async function handleAutoTag() {
+  const items = Zotero.getActiveZoteroPane().getSelectedItems();
+  if (!items || items.length === 0) {
+    new ztoolkit.ProgressWindow("AI Butler", {
+      closeOnClick: true,
+      closeTime: 3000,
+    })
+      .createLine({ text: "请先选择要打标签的文献", type: "error" })
+      .show();
+    return;
+  }
+
+  try {
+    const { TaskQueueManager } = await import("./modules/taskQueue");
+    const manager = TaskQueueManager.getInstance();
+    let count = 0;
+
+    for (const item of items) {
+      if (!item.isRegularItem()) continue;
+      await manager.addAutoTagTask(item);
+      count += 1;
+    }
+
+    const mainWin = MainWindow.getInstance();
+    await mainWin.open("tasks");
+    try {
+      mainWin.getTaskQueueView().refresh();
+    } catch (e) {
+      ztoolkit.log("[AI-Butler] 刷新任务队列视图失败:", e);
+    }
+
+    new ztoolkit.ProgressWindow("AI Butler", {
+      closeOnClick: true,
+      closeTime: 4000,
+    })
+      .createLine({
+        text: `🏷️ 已加入队列: ${count} 篇文献自动标签任务`,
+        type: "success",
+      })
+      .show();
+  } catch (error: any) {
+    ztoolkit.log("[AI-Butler] 自动标签失败:", error);
+    new ztoolkit.ProgressWindow("AI Butler", {
+      closeOnClick: true,
+      closeTime: 5000,
+    })
+      .createLine({
+        text: `❌ 自动标签失败: ${error.message || error}`,
         type: "error",
       })
       .show();

@@ -7,7 +7,8 @@ export type FixedTaskArtifactType =
   | "summary"
   | "imageSummary"
   | "mindmap"
-  | "tableFill";
+  | "tableFill"
+  | "autoTag";
 
 export interface TaskArtifactProbeResult {
   exists: boolean;
@@ -30,6 +31,8 @@ export class TaskArtifacts {
           return this.probeMindmap(item);
         case "tableFill":
           return this.probeTable(item);
+        case "autoTag":
+          return this.probeAutoTag(item);
       }
 
       return {
@@ -104,6 +107,15 @@ export class TaskArtifacts {
     return content?.trim()
       ? { exists: true }
       : { exists: false, reason: "table-note-empty" };
+  }
+
+  private static async probeAutoTag(
+    item: Zotero.Item,
+  ): Promise<TaskArtifactProbeResult> {
+    const { AutoTagService } = await import("./autoTagService");
+    return AutoTagService.itemHasAllowedTag(item)
+      ? { exists: true }
+      : { exists: false, reason: "auto-tag-missing" };
   }
 
   private static noteHasUsableContent(note: Zotero.Item): boolean {
