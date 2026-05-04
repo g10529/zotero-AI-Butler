@@ -288,7 +288,7 @@ export class PromptsSettingsPage {
 
     autoTagSection.appendChild(
       createNotice(
-        "文献右键菜单中的“AI 管家自动标签”会读取下方候选标签列表，并仅从这些标签中选择结果写入 Zotero 条目。",
+        "文献右键菜单中的“AI 管家自动标签”会读取下方候选标签列表，并仅从这些标签中选择结果写入 Zotero 条目。请将示例行替换为你的真实标签；每行一个标签，使用 / 表示层级。",
         "info",
       ),
     );
@@ -314,7 +314,7 @@ export class PromptsSettingsPage {
       createFormGroup(
         "候选标签列表",
         this.autoTagEditor,
-        "每行一个标签，必须以 # 开头，使用 / 表示层级，例如：#性能/力学性能/抗压强度",
+        "格式：#一级分类/二级分类/具体标签。示例：#研究方法/实验研究/对照实验。自动标签只会从这里列出的标签中选择。",
       ),
     );
 
