@@ -27,6 +27,11 @@ import {
   createNotice,
   createCheckbox,
 } from "../ui/components";
+import {
+  getDefaultAutoTagList,
+  parseAutoTagList,
+  summarizeAutoTagList,
+} from "../../../utils/autoTags";
 
 type PresetMap = Record<string, string>;
 
@@ -40,6 +45,8 @@ export class PromptsSettingsPage {
   private sampleTitle!: HTMLInputElement;
   private sampleAuthors!: HTMLInputElement;
   private sampleYear!: HTMLInputElement;
+  private autoTagEditor!: HTMLTextAreaElement;
+  private autoTagStats!: HTMLElement;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -259,6 +266,87 @@ export class PromptsSettingsPage {
     multiRoundContainer.appendChild(finalPromptContainer);
     modeSection.appendChild(multiRoundContainer);
     contentWrapper.appendChild(modeSection);
+
+    // =========== 自动标签设置 ===========
+    const autoTagSection = Zotero.getMainWindow().document.createElement("div");
+    Object.assign(autoTagSection.style, {
+      marginBottom: "24px",
+      padding: "16px",
+      background: "var(--ai-input-bg)",
+      borderRadius: "8px",
+      border: "1px solid var(--ai-input-border)",
+    });
+
+    const autoTagTitle = Zotero.getMainWindow().document.createElement("h3");
+    autoTagTitle.textContent = "🏷️ 自动标签";
+    Object.assign(autoTagTitle.style, {
+      color: "#59c0bc",
+      marginBottom: "12px",
+      fontSize: "16px",
+    });
+    autoTagSection.appendChild(autoTagTitle);
+
+    autoTagSection.appendChild(
+      createNotice(
+        "文献右键菜单中的“AI 管家自动标签”会读取下方候选标签列表，并仅从这些标签中选择结果写入 Zotero 条目。请将示例行替换为你的真实标签；每行一个标签，使用 / 表示层级。",
+        "info",
+      ),
+    );
+
+    const autoTagList =
+      (getPref("autoTagList" as any) as string) || getDefaultAutoTagList();
+    this.autoTagEditor = createTextarea(
+      "auto-tag-list-editor",
+      autoTagList,
+      14,
+      "#性能/力学性能/抗压强度",
+    );
+    this.autoTagEditor.addEventListener("input", () => {
+      this.updateAutoTagStats(this.autoTagEditor.value);
+    });
+    this.autoTagEditor.addEventListener("blur", () => {
+      this.saveAutoTagList();
+    });
+    this.autoTagEditor.addEventListener("change", () => {
+      this.saveAutoTagList();
+    });
+    autoTagSection.appendChild(
+      createFormGroup(
+        "候选标签列表",
+        this.autoTagEditor,
+        "格式：#一级分类/二级分类/具体标签。示例：#研究方法/实验研究/对照实验。自动标签只会从这里列出的标签中选择。",
+      ),
+    );
+
+    const autoTagActions = Zotero.getMainWindow().document.createElement("div");
+    Object.assign(autoTagActions.style, {
+      display: "flex",
+      gap: "10px",
+      marginBottom: "12px",
+    });
+    const saveAutoTagsBtn = createStyledButton("保存标签列表", "#4caf50");
+    saveAutoTagsBtn.addEventListener("click", () => this.saveAutoTagList(true));
+    const resetAutoTagsBtn = createStyledButton("恢复默认标签", "#9e9e9e");
+    resetAutoTagsBtn.addEventListener("click", () => {
+      this.autoTagEditor.value = getDefaultAutoTagList();
+      this.saveAutoTagList(true);
+    });
+    autoTagActions.appendChild(saveAutoTagsBtn);
+    autoTagActions.appendChild(resetAutoTagsBtn);
+    autoTagSection.appendChild(autoTagActions);
+
+    this.autoTagStats = Zotero.getMainWindow().document.createElement("div");
+    Object.assign(this.autoTagStats.style, {
+      marginTop: "-4px",
+      fontSize: "12px",
+      color: "var(--ai-text-muted)",
+      lineHeight: "1.6",
+      whiteSpace: "pre-wrap",
+    });
+    autoTagSection.appendChild(this.autoTagStats);
+    this.updateAutoTagStats(autoTagList);
+
+    contentWrapper.appendChild(autoTagSection);
 
     // =========== 原有的单次提示词设置 ===========
     // 左右布局
@@ -640,6 +728,48 @@ export class PromptsSettingsPage {
     };
     const content = this.interpolate(this.editor.value || "", vars);
     this.previewBox.textContent = content.substring(0, 2000);
+  }
+
+  private saveAutoTagList(showToast: boolean = false): void {
+    const parsed = parseAutoTagList(this.autoTagEditor.value || "");
+    const normalized = parsed.tags.join("\n");
+    const value = normalized || getDefaultAutoTagList();
+    setPref("autoTagList" as any, value);
+    this.autoTagEditor.value = value;
+    this.updateAutoTagStats(value);
+
+    if (showToast) {
+      new ztoolkit.ProgressWindow("自动标签")
+        .createLine({
+          text: `已保存 ${parseAutoTagList(value).tags.length} 个候选标签`,
+          type: "success",
+        })
+        .show();
+    }
+  }
+
+  private updateAutoTagStats(raw: string): void {
+    if (!this.autoTagStats) return;
+
+    const parsed = parseAutoTagList(raw || "");
+    const summary = summarizeAutoTagList(parsed.tags);
+    const lines = [
+      `已识别 ${summary.total} 个标签`,
+      summary.roots.length
+        ? `一级分类 ${summary.roots.length} 个：${summary.roots.join("、")}`
+        : "一级分类 0 个",
+    ];
+
+    if (parsed.invalidLines.length) {
+      lines.push(`格式异常 ${parsed.invalidLines.length} 行`);
+    }
+    if (parsed.duplicateLines.length) {
+      lines.push(`重复标签 ${parsed.duplicateLines.length} 行`);
+    }
+
+    this.autoTagStats.textContent = lines.join("\n");
+    this.autoTagStats.style.color =
+      parsed.invalidLines.length > 0 ? "#d32f2f" : "var(--ai-text-muted)";
   }
 
   private interpolate(tpl: string, vars: Record<string, string>): string {

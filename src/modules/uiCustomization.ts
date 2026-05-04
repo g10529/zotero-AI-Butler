@@ -50,6 +50,12 @@ export const CONTEXT_MENU_ITEMS = [
     scope: "item",
   },
   {
+    id: "autoTag",
+    label: "AI 管家自动标签",
+    description: "文献右键：从候选标签列表中自动选择并添加标签",
+    scope: "item",
+  },
+  {
     id: "literatureReview",
     label: "AI 管家文献综述",
     description: "分类右键：打开文献综述配置",
@@ -107,6 +113,7 @@ export const DEFAULT_CONTEXT_MENU_ITEM_VISIBILITY: ContextMenuVisibility = {
   imageSummary: true,
   mindmap: true,
   fillTable: true,
+  autoTag: true,
   literatureReview: true,
 };
 
@@ -136,6 +143,7 @@ export const DEFAULT_CONTEXT_MENU_ITEM_ORDER: ContextMenuItemId[] = [
   "imageSummary",
   "mindmap",
   "fillTable",
+  "autoTag",
   "literatureReview",
 ];
 

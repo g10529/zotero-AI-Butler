@@ -63,6 +63,7 @@ export type TaskType =
   | "imageSummary"
   | "mindmap"
   | "tableFill"
+  | "autoTag"
   | "review"
   | "targetedQuestion";
 
@@ -306,6 +307,10 @@ export class TaskQueueManager {
         (getPref("tableStrategy" as any) as string) || "skip"
       ).toLowerCase();
       return policy === "overwrite";
+    }
+
+    if (artifactType === "autoTag") {
+      return true;
     }
 
     return false;
@@ -1021,6 +1026,119 @@ export class TaskQueueManager {
   }
 
   /**
+   * 添加自动标签任务
+   */
+  public async addAutoTagTask(item: Zotero.Item): Promise<string> {
+    const taskId = `auto-tag-task-${item.id}`;
+
+    if (this.tasks.has(taskId)) {
+      const existingTask = this.tasks.get(taskId)!;
+      const shouldRun = await this.requeueExistingFixedTask(
+        existingTask,
+        item,
+        "autoTag",
+        true,
+        undefined,
+        "等待开始",
+      );
+      if (shouldRun) {
+        this.executeAutoTagTask(taskId).catch((e) => {
+          logTaskQueue(`自动标签任务执行失败: ${e}`);
+        });
+      }
+      return taskId;
+    }
+
+    const task: TaskItem = {
+      id: taskId,
+      itemId: item.id,
+      title: `自动标签: ${item.getField("title") || "未知标题"}`,
+      status: TaskStatus.PRIORITY,
+      progress: 0,
+      createdAt: new Date(),
+      retryCount: 0,
+      maxRetries: 1,
+      taskType: "autoTag",
+      workflowStage: "等待开始",
+    };
+
+    this.tasks.set(taskId, task);
+    await this.saveToStorage();
+
+    logTaskQueue(`添加自动标签任务: ${task.title} (${taskId})`);
+
+    this.executeAutoTagTask(taskId).catch((e) => {
+      logTaskQueue(`自动标签任务执行失败: ${e}`);
+    });
+
+    return taskId;
+  }
+
+  /**
+   * 执行自动标签任务
+   */
+  private async executeAutoTagTask(taskId: string): Promise<void> {
+    const task = this.tasks.get(taskId);
+    if (!task || task.taskType !== "autoTag") return;
+
+    if (
+      task.status === TaskStatus.PROCESSING ||
+      task.status === TaskStatus.COMPLETED
+    )
+      return;
+
+    task.status = TaskStatus.PROCESSING;
+    task.startedAt = new Date();
+    task.progress = 0;
+    task.workflowStage = "正在初始化";
+    this.processingTasks.add(taskId);
+    await this.saveToStorage();
+
+    try {
+      const item = await Zotero.Items.getAsync(task.itemId);
+      if (!item) throw new Error("文献条目不存在");
+
+      const { AutoTagService } = await import("./autoTagService");
+
+      task.workflowStage = "正在分析论文";
+      task.progress = 30;
+      this.notifyProgress(taskId, 30, "正在分析论文");
+
+      const result = await AutoTagService.generateAndApplyTags(item);
+
+      task.workflowStage = result.addedTags.length
+        ? `新增标签 ${result.addedTags.length} 个`
+        : result.chosenTags.length
+          ? "标签已存在"
+          : "未命中标签";
+      task.progress = 90;
+      this.notifyProgress(taskId, 90, task.workflowStage);
+
+      task.status = TaskStatus.COMPLETED;
+      task.progress = 100;
+      task.completedAt = new Date();
+      task.duration = Math.floor(
+        (task.completedAt.getTime() - task.startedAt!.getTime()) / 1000,
+      );
+
+      this.notifyProgress(taskId, 100, "完成");
+      logTaskQueue(
+        `自动标签任务完成: ${task.title} (新增${result.addedTags.length}个，命中${result.chosenTags.length}个)`,
+      );
+      this.notifyComplete(taskId, true);
+    } catch (error: any) {
+      task.error = error?.message || "未知错误";
+      task.workflowStage = "失败";
+      task.status = TaskStatus.FAILED;
+      task.completedAt = new Date();
+      this.notifyComplete(taskId, false, task.error);
+    } finally {
+      this.processingTasks.delete(taskId);
+      await this.saveToStorage();
+    }
+  }
+
+  /**
    * 获取综述任务
    */
   public getReviewTasks(): TaskItem[] {
@@ -1549,6 +1667,10 @@ export class TaskQueueManager {
       }
       if (task.taskType === "tableFill") {
         await this.executeTableFillTask(taskId);
+        return false;
+      }
+      if (task.taskType === "autoTag") {
+        await this.executeAutoTagTask(taskId);
         return false;
       }
       if (task.taskType === "review") {

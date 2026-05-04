@@ -21,6 +21,7 @@ import {
   parseOpenAIResponsesDelta,
   parseOpenAIResponsesText,
 } from "./shared/openaiResponses";
+import OpenAICompatProvider from "./OpenAICompatProvider";
 
 export class OpenAIProvider implements ILlmProvider {
   readonly id = "openai";
@@ -32,6 +33,11 @@ export class OpenAIProvider implements ILlmProvider {
     supportsSystemPrompt: true,
     supportedParams: ["temperature", "topP", "maxTokens", "stream"],
   };
+  private readonly compatProvider = new OpenAICompatProvider();
+
+  private shouldUseCompatApi(apiUrl: string): boolean {
+    return /\/chat\/completions(?:[/?#]|$)/i.test(apiUrl.trim());
+  }
 
   async generateSummary(
     content: string,
@@ -45,6 +51,16 @@ export class OpenAIProvider implements ILlmProvider {
     const model = (options.model || "gpt-3.5-turbo").trim();
     const temperature = options.temperature ?? 0.7;
     const streamEnabled = options.stream ?? true;
+
+    if (this.shouldUseCompatApi(apiUrl)) {
+      return this.compatProvider.generateSummary(
+        content,
+        isBase64,
+        prompt,
+        options,
+        onProgress,
+      );
+    }
 
     if (!apiUrl) throw new Error("API URL 未配置");
     if (!apiKey) throw new Error("API Key 未配置");
@@ -436,6 +452,16 @@ export class OpenAIProvider implements ILlmProvider {
     const model = (options.model || "gpt-3.5-turbo").trim();
     const temperature = options.temperature ?? 0.7;
     const streamEnabled = options.stream ?? true;
+
+    if (this.shouldUseCompatApi(apiUrl)) {
+      return this.compatProvider.chat(
+        pdfContent,
+        isBase64,
+        conversation,
+        options,
+        onProgress,
+      );
+    }
 
     if (!apiUrl) throw new Error("API URL 未配置");
     if (!apiKey) throw new Error("API Key 未配置");
@@ -849,6 +875,9 @@ export class OpenAIProvider implements ILlmProvider {
     const apiKey = (options.apiKey || "").trim();
     const apiUrl = (options.apiUrl || "").trim();
     const model = (options.model || "gpt-5").trim();
+    if (this.shouldUseCompatApi(apiUrl)) {
+      return this.compatProvider.testConnection(options);
+    }
     if (!apiUrl) throw new Error("API URL 未配置");
     if (!apiKey) throw new Error("API Key 未配置");
 
@@ -1004,6 +1033,15 @@ export class OpenAIProvider implements ILlmProvider {
     const apiKey = (options.apiKey || "").trim();
     const apiUrl = (options.apiUrl || "").trim();
     const model = (options.model || "gpt-4o").trim();
+
+    if (this.shouldUseCompatApi(apiUrl)) {
+      return this.compatProvider.generateMultiFileSummary(
+        pdfFiles,
+        prompt,
+        options,
+        onProgress,
+      );
+    }
 
     if (!apiUrl) throw new Error("API URL 未配置");
     if (!apiKey) throw new Error("API Key 未配置");
