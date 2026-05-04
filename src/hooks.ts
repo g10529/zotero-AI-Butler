@@ -315,10 +315,15 @@ const CONTEXT_MENU_DOM_IDS: Record<ContextMenuItemId, string> = {
   literatureReview: "zotero-collectionmenu-ai-butler-literature-review",
 };
 
+const ITEM_CONTEXT_MENU_ROOT_ID = "zotero-itemmenu-ai-butler-root";
+const COLLECTION_CONTEXT_MENU_ROOT_ID = "zotero-collectionmenu-ai-butler-root";
+
 function unregisterContextMenuItems(menu: {
   unregister?: (menuId: string) => void;
 }): void {
   if (typeof menu.unregister !== "function") return;
+  menu.unregister(ITEM_CONTEXT_MENU_ROOT_ID);
+  menu.unregister(COLLECTION_CONTEXT_MENU_ROOT_ID);
   for (const item of CONTEXT_MENU_ITEMS) {
     menu.unregister(CONTEXT_MENU_DOM_IDS[item.id]);
   }
@@ -380,7 +385,7 @@ function registerContextMenuItem() {
       options: {
         tag: "menuitem",
         id: CONTEXT_MENU_DOM_IDS.generateSummary,
-        label: getString("menuitem-generateSummary"),
+        label: "分析",
         icon: menuIcon,
         commandListener: (_ev: Event) => {
           handleGenerateSummary();
@@ -395,7 +400,7 @@ function registerContextMenuItem() {
       options: {
         tag: "menu",
         id: CONTEXT_MENU_DOM_IDS.multiRoundReanalyze,
-        label: getString("menuitem-multiRoundReanalyze" as any),
+        label: "多轮重读",
         icon: menuIcon,
         children: [
           {
@@ -419,7 +424,7 @@ function registerContextMenuItem() {
       options: {
         tag: "menuitem",
         id: CONTEXT_MENU_DOM_IDS.dashboard,
-        label: "AI 管家仪表盘",
+        label: "仪表盘",
         icon: menuIcon,
         commandListener: async (_ev: Event) => {
           await openAIButlerDashboardFromUnifiedEntry();
@@ -432,7 +437,7 @@ function registerContextMenuItem() {
       options: {
         tag: "menuitem",
         id: CONTEXT_MENU_DOM_IDS.chatWithAI,
-        label: getString("menuitem-chatWithAI"),
+        label: "后续追问",
         icon: menuIcon,
         commandListener: async (_ev: Event) => {
           await handleChatWithAI();
@@ -458,7 +463,7 @@ function registerContextMenuItem() {
       options: {
         tag: "menuitem",
         id: CONTEXT_MENU_DOM_IDS.imageSummary,
-        label: getString("menuitem-imageSummary"),
+        label: "一图总结",
         icon: menuIcon,
         commandListener: async () => {
           await handleImageSummary();
@@ -472,7 +477,7 @@ function registerContextMenuItem() {
       options: {
         tag: "menuitem",
         id: CONTEXT_MENU_DOM_IDS.mindmap,
-        label: getString("menuitem-mindmap" as any),
+        label: "思维导图",
         icon: menuIcon,
         commandListener: async () => {
           await handleMindmapGeneration();
@@ -486,7 +491,7 @@ function registerContextMenuItem() {
       options: {
         tag: "menuitem",
         id: CONTEXT_MENU_DOM_IDS.fillTable,
-        label: getString("menuitem-fillTable" as any),
+        label: "填表",
         icon: menuIcon,
         commandListener: async () => {
           await handleFillTable();
@@ -500,7 +505,7 @@ function registerContextMenuItem() {
       options: {
         tag: "menuitem",
         id: CONTEXT_MENU_DOM_IDS.autoTag,
-        label: "AI 管家自动标签",
+        label: "自动标签",
         icon: menuIcon,
         commandListener: async () => {
           await handleAutoTag();
@@ -514,7 +519,7 @@ function registerContextMenuItem() {
       options: {
         tag: "menuitem",
         id: CONTEXT_MENU_DOM_IDS.literatureReview,
-        label: getString("menuitem-literatureReview" as any),
+        label: "文献综述",
         icon: menuIcon,
         commandListener: async () => {
           await handleLiteratureReview();
@@ -524,10 +529,43 @@ function registerContextMenuItem() {
     },
   };
 
-  for (const itemId of getContextMenuItemOrder()) {
-    const definition = menuDefinitions[itemId];
-    menu.register(definition.scope, definition.options);
+  const orderedDefinitions = getContextMenuItemOrder().map(
+    (itemId) => menuDefinitions[itemId],
+  );
+  const itemChildren = orderedDefinitions
+    .filter((definition) => definition.scope === "item")
+    .map((definition) => definition.options);
+  const collectionChildren = orderedDefinitions
+    .filter((definition) => definition.scope === "collection")
+    .map((definition) => definition.options);
+  const hasVisibleChild = (children: any[]) =>
+    children.some(
+      (child) =>
+        typeof child.getVisibility !== "function" || child.getVisibility(),
+    );
+
+  if (itemChildren.length > 0) {
+    menu.register("item", {
+      tag: "menu",
+      id: ITEM_CONTEXT_MENU_ROOT_ID,
+      label: "AI管家",
+      icon: menuIcon,
+      children: itemChildren,
+      getVisibility: () => hasVisibleChild(itemChildren),
+    });
   }
+
+  if (collectionChildren.length > 0) {
+    menu.register("collection", {
+      tag: "menu",
+      id: COLLECTION_CONTEXT_MENU_ROOT_ID,
+      label: "AI管家",
+      icon: menuIcon,
+      children: collectionChildren,
+      getVisibility: () => hasVisibleChild(collectionChildren),
+    });
+  }
+
 }
 
 /**
