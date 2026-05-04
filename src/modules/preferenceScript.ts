@@ -226,6 +226,7 @@ function initializeDefaultPrefs() {
     stream: true,
     summaryPrompt: getDefaultSummaryPrompt(),
     autoTagList: getDefaultAutoTagList(),
+    autoTagAfterSummary: false,
     promptVersion: PROMPT_VERSION,
     // 文献综述表格填写相关
     tableTemplate: getDefaultTableTemplate(),

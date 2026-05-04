@@ -300,6 +300,28 @@ export class NoteGenerator {
       // 通知进度回调完成 (100%)
       progressCallback?.("完成！", 100);
 
+      // 自动标签（不阻塞笔记返回）
+      const autoTagAfterSummary =
+        (getPref("autoTagAfterSummary" as any) as boolean) ?? false;
+      if (autoTagAfterSummary) {
+        import("./autoTagService")
+          .then(({ AutoTagService }) => {
+            void (async () => {
+              try {
+                const result = await AutoTagService.generateAndApplyTags(item);
+                ztoolkit.log(
+                  `[AI-Butler] 自动标签完成: ${itemTitle}，新增 ${result.addedTags.length} 个，命中 ${result.chosenTags.length} 个`,
+                );
+              } catch (e) {
+                ztoolkit.log("[AI-Butler] 总结后自动标签失败:", e);
+              }
+            })();
+          })
+          .catch((e) => {
+            ztoolkit.log("[AI-Butler] 加载自动标签服务失败:", e);
+          });
+      }
+
       // 异步并行填表（不阻塞笔记返回）
       const enableTable =
         (getPref("enableTableOnSingleNote" as any) as boolean) ?? true;

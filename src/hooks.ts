@@ -236,6 +236,7 @@ function initializeDefaultPrefsOnStartup() {
     stream: true, // 默认启用流式输出,提供更好的用户体验
     summaryPrompt: getDefaultSummaryPrompt(), // 加载默认提示词模板
     autoTagList: getDefaultAutoTagList(),
+    autoTagAfterSummary: false,
     promptVersion: PROMPT_VERSION, // 当前提示词版本号
     contextMenuItemVisibility: DEFAULT_CONTEXT_MENU_ITEM_VISIBILITY_PREF,
     contextMenuItemOrder: DEFAULT_CONTEXT_MENU_ITEM_ORDER_PREF,
@@ -565,7 +566,6 @@ function registerContextMenuItem() {
       getVisibility: () => hasVisibleChild(collectionChildren),
     });
   }
-
 }
 
 /**

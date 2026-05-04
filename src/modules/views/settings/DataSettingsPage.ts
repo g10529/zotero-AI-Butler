@@ -164,6 +164,7 @@ export class DataSettingsPage {
       "stream",
       "summaryPrompt",
       "autoTagList",
+      "autoTagAfterSummary",
       "customPrompts",
       "maxRetries",
       "batchSize",
@@ -271,6 +272,7 @@ export class DataSettingsPage {
     // 恢复常用项
     setPref("summaryPrompt", getDefaultSummaryPrompt());
     setPref("autoTagList" as any, getDefaultAutoTagList());
+    setPref("autoTagAfterSummary" as any, false);
     setPref("provider", "openai");
     setPref("openaiApiUrl", "https://api.openai.com/v1/responses");
     setPref("openaiApiKey", "");

@@ -38,6 +38,7 @@ declare namespace _ZoteroTypes {
       "mineruModelVersion": string;
       "summaryPrompt": string;
       "autoTagList": string;
+      "autoTagAfterSummary": boolean;
       "customPrompts": string;
       "summaryMode": string;
       "multiRoundPrompts": string;

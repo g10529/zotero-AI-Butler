@@ -293,6 +293,26 @@ export class PromptsSettingsPage {
       ),
     );
 
+    const autoTagAfterSummary =
+      (getPref("autoTagAfterSummary" as any) as boolean) ?? false;
+    const autoTagAfterSummaryBox = createCheckbox(
+      "auto-tag-after-summary",
+      autoTagAfterSummary,
+    );
+    autoTagAfterSummaryBox.addEventListener("click", () => {
+      const input = autoTagAfterSummaryBox.querySelector(
+        "input",
+      ) as HTMLInputElement | null;
+      setPref("autoTagAfterSummary" as any, !!input?.checked);
+    });
+    autoTagSection.appendChild(
+      createFormGroup(
+        "生成总结后自动打标签",
+        autoTagAfterSummaryBox,
+        "开启后，普通 AI 总结成功保存笔记后会自动执行一次打标签；失败不会影响总结结果。",
+      ),
+    );
+
     const autoTagList =
       (getPref("autoTagList" as any) as string) || getDefaultAutoTagList();
     this.autoTagEditor = createTextarea(

@@ -58,6 +58,7 @@ pref(
   "__prefsPrefix__.autoTagList",
   "#研究主题/请替换为你的一级主题/请替换为具体方向\n#研究方法/请替换为方法类别/请替换为具体方法\n#研究对象/请替换为对象类别/请替换为具体对象\n#数据类型/请替换为数据类别\n#应用场景/请替换为应用领域\n#结论类型/请替换为主要发现类型",
 );
+pref("__prefsPrefix__.autoTagAfterSummary", false);
 pref("__prefsPrefix__.customPrompts", "[]");
 // 多轮对话总结模式: "single"(单次对话) | "multi_concat"(多轮拼接) | "multi_summarize"(多轮后总结)
 pref("__prefsPrefix__.summaryMode", "single");
